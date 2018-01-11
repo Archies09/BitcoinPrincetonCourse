@@ -1,4 +1,5 @@
 import java.util.*;
+
 public class MaxFeeTxHandler {
 
     UTXOPool publicLedger,doubleSpendCheck;
@@ -103,8 +104,8 @@ public class MaxFeeTxHandler {
     
     
     LinkedList<Transaction> finalSolutionSet = new LinkedList<Transaction>();
-    LinkedList<Transaction> listOfContestedTx = new LinkedList<Transaction>();
-    HashMap<UTXO,LinkedList<Transaction>> utxoToListOfTransactions = new HashMap<UTXO,LinkedList<Transaction>>();
+    HashSet<Transaction> listOfContestedTx = new HashSet<Transaction>();
+    HashMap<UTXO,HashSet<Transaction> > utxoToListOfTransactions = new HashMap<UTXO,HashSet<Transaction> >();
     
     double finalSolutionAnswer=0.0;
 
@@ -112,7 +113,9 @@ public class MaxFeeTxHandler {
 
     public void recursiveProcedure(LinkedList<Transaction> possibleTxsList)
     {
-    	Iterator<Transaction> iter = possibleTxsList.iterator();
+    	LinkedList<Transaction> copyOfPossibleTxsList = new LinkedList<Transaction>();
+    	copyOfPossibleTxsList.addAll(possibleTxsList);
+    	Iterator<Transaction> iter = copyOfPossibleTxsList.iterator();
         HashMap<Transaction, Boolean> validityMap = new HashMap<Transaction,Boolean>();
     	int flag=0;
     	while(iter.hasNext())
@@ -134,7 +137,7 @@ public class MaxFeeTxHandler {
     	
     	else
     	{
-    		iter = possibleTxsList.iterator();
+    		iter = copyOfPossibleTxsList.iterator();
     		while(iter.hasNext())
         	{
         		Transaction t = iter.next();
@@ -147,17 +150,16 @@ public class MaxFeeTxHandler {
 	    				{
 	    					if(utxoToListOfTransactions.get(checkUtxo)==null)
 	    					{	
-								utxoToListOfTransactions.put(checkUtxo, new LinkedList<Transaction>());
+								utxoToListOfTransactions.put(checkUtxo, new HashSet<Transaction>());
 	    					}
 	    					utxoToListOfTransactions.get(checkUtxo).add(t);
-						
 	    					
 	    				}
     				}
     			}
     		}
     		
-    		iter = possibleTxsList.iterator();
+    		iter = copyOfPossibleTxsList.iterator();
     		
     		while(iter.hasNext())
         	{
@@ -167,7 +169,7 @@ public class MaxFeeTxHandler {
     				int flag2=0;
     				for(int i=0;i<t.numInputs();i++)
     				{
-    					if(utxoToListOfTransactions.get(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex)).size()!=1)
+    					if(utxoToListOfTransactions.get(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex)).size()>1)
     						flag2=1;
     				}
     				if(flag2==0)
@@ -185,7 +187,7 @@ public class MaxFeeTxHandler {
     	            	}
     					
     					iter.remove();
-    					recursiveProcedure(possibleTxsList);
+    					recursiveProcedure(copyOfPossibleTxsList);
     				}
     				else
     				{
@@ -252,31 +254,45 @@ public class MaxFeeTxHandler {
     		LinkedList<Transaction> newReducedListOfPossibleTxs = new LinkedList<Transaction>();
     		newCopyOfUtxoPool=createCopyOfUtxoPool(copyOfUtxoPool);
     		newReducedListOfPossibleTxs.addAll(reducedPossibleTxsList);
+    		
+    		
     		if(isValidWithPool(t,newCopyOfUtxoPool)==false)
     			continue;
+    		
+    		
+    		for(int i=0;i<t.numInputs();i++)
+			{
+				UTXO checkUtxo = new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex);
+				if(checkUtxo!=null)
+				{
+    				if(newCopyOfUtxoPool.contains(checkUtxo))
+    				{
+    					if(utxoToListOfTransactions.get(checkUtxo)==null)
+    					{	
+							utxoToListOfTransactions.put(checkUtxo, new HashSet<Transaction>());
+    					}
+    					utxoToListOfTransactions.get(checkUtxo).add(t);
+    					
+    				}
+				}
+			}
+    		
+    		
     		for(int i=0;i<t.numInputs();i++)
         	{
-    			LinkedList <Transaction> rivalTransactions = utxoToListOfTransactions.get(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex));
+    			HashSet <Transaction> rivalTransactions = utxoToListOfTransactions.get(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex));
 				newCopyOfUtxoPool.removeUTXO(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex));
-				Iterator<Transaction> itera = newReducedListOfPossibleTxs.iterator();
-	    		for(Transaction tx : rivalTransactions)
-	        	{
-	    			if(itera.hasNext())
-	        		{
-	    				Transaction tp = itera.next();
-	        			if(newReducedListOfPossibleTxs.contains(tx)==true)
-	        				itera.remove();
-	        		}
-	        	}
+				newReducedListOfPossibleTxs.removeAll(rivalTransactions);
         	}
 	
 			for(int i=0;i<t.numOutputs();i++)
 			{
                	newCopyOfUtxoPool.addUTXO(new UTXO(t.getHash(),i),t.getOutput(i));
         	}
-    	
+			
 			ReturnValues rvalue = anotherRecursion(newCopyOfUtxoPool,newReducedListOfPossibleTxs);
-			if(rvalue.getFee()>rMax)
+			
+			if(rvalue.getFee()+profitCalculator(t)>rMax)
 			{
 				rMax=rvalue.getFee()+profitCalculator(t);
 				rList=rvalue.getList();
@@ -294,7 +310,10 @@ public class MaxFeeTxHandler {
     	ReturnValues finalValues;
     	LinkedList<Transaction> llPossibleTxs = new LinkedList<Transaction>(Arrays.asList(possibleTxs));
     	recursiveProcedure(llPossibleTxs);
-    	finalValues=anotherRecursion(createCopyOfUtxoPool(publicLedger),listOfContestedTx);
+    	LinkedList<Transaction> linkedListOfContestedTxs = new LinkedList<Transaction>();
+    	linkedListOfContestedTxs.addAll(Arrays.asList(possibleTxs));
+    	linkedListOfContestedTxs.removeAll(finalSolutionSet);
+    	finalValues=anotherRecursion(createCopyOfUtxoPool(publicLedger),linkedListOfContestedTxs);
     	
     	finalSolutionList=finalValues.getList();
     	finalSolutionList.addAll(finalSolutionSet);
@@ -305,4 +324,3 @@ public class MaxFeeTxHandler {
     }
 
 }
-
