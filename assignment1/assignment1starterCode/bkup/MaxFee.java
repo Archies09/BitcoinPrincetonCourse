@@ -63,23 +63,23 @@ public class MaxFeeTxHandler {
     					sumOfInputs+=(currentPool.getTxOutput(new UTXO(tx.getInput(i).prevTxHash,tx.getInput(i).outputIndex))).value;
     				
     				}			
-    				else {System.err.println("Wrong crypto"+tx);return false;}
+    				else return false;
     			}
-    			else {System.err.println("Double Spending"+tx);return false;}
+    			else return false;
     		}
-    		else {System.err.println("Not in currentpool"+tx);return false;}
+    		else return false;
     	}
     	
     	double sumOfOutputs=0;
     	for(int i=0;i<tx.numOutputs();i++)
     	{
     		if(tx.getOutput(i).value<0)
-    			{System.err.println("Op value is low for"+tx);return false;}
+    			return false;
     		else	sumOfOutputs+=tx.getOutput(i).value;
     	}
 
     	if(sumOfInputs<sumOfOutputs)
-    		{System.err.println("Op value is high for"+tx);return false;}
+    		return false;
             return true;
         }
     
@@ -133,8 +133,7 @@ public class MaxFeeTxHandler {
 
     HashMap<Transaction,HashSet<Transaction> > dependencyGraph = new HashMap<Transaction,HashSet<Transaction> >();
     HashMap<Transaction,HashSet<Transaction> > dependencyList = new HashMap<Transaction,HashSet<Transaction> >();
-    HashMap<Transaction,HashSet<Transaction> > dependencyMapList = new HashMap<Transaction,HashSet<Transaction> >();
-    HashMap<Transaction,Boolean> dependencyMap = new HashMap<Transaction,Boolean>();
+
     
     HashSet<Transaction> possibleTxsSet = new HashSet<Transaction>();
     List<Transaction> topoOrder = new ArrayList<Transaction>();
@@ -199,9 +198,7 @@ public class MaxFeeTxHandler {
     	{
     		HashMap<Transaction,Boolean> visitedMap = new HashMap<Transaction,Boolean>();
     		dfsOrdering(t,visitedMap);
-    		HashSet<Transaction> txmap = new HashSet<Transaction>();
-    		txmap.addAll(listOfConnectedTx);
-    		dependencyList.put(t,txmap);
+    		dependencyList.put(t, listOfConnectedTx);
     		listOfConnectedTx.clear();
     	}
     	
@@ -222,41 +219,103 @@ public class MaxFeeTxHandler {
     }
     
     HashMap<UTXO,HashSet<Transaction> > utxoToListOfTransactions = new HashMap<UTXO,HashSet<Transaction> >();
-    HashMap<Transaction, HashSet<Transaction> > conflictingTx = new HashMap<Transaction, HashSet<Transaction> >();
- 
-    void subsetConstructor(UTXOPool presentPool,HashSet<Transaction> solutionSubset, HashSet<Transaction> hpossibleTx,HashSet<Transaction> oldhpossibleTx)
+    
+    void subsetConstructor(UTXOPool presentPool,HashSet<Transaction> solutionSubset, HashSet<Transaction> hpossibleTx,HashMap<UTXO, HashSet<Transaction> > oldUtxoToListOfTransactions,HashSet<Transaction> rejectionSet)
     {
     	
     	int subFlag=0;
         
+
     	
-    	Iterator<Transaction> titer = hpossibleTx.iterator();
-    	while(titer.hasNext())
+    	if(firstLoop==0)
     	{
-    		Transaction t = titer.next();
-    		if(conflictingTx.get(t).isEmpty()==true && dependencyMap.get(t)==true)
+    		Iterator<Transaction> myIter = hpossibleTx.iterator();
+    		while(myIter.hasNext())
     		{
-    			if(solutionSubset.containsAll(dependencyMapList.get(t))==true)
+    			Transaction t = myIter.next();
+    			int anotherFlag=0;
+inner: 			for(Transaction q : hpossibleTx)
+        		{
+        			if(dependencyGraph.get(q).contains(t)==true)
+        				{
+        					anotherFlag=1;
+        					break inner;
+        				}
+        		}
+    			if(anotherFlag==0)
     			{
-    				titer.remove();
-    				solutionSubset.add(t);
+    				int anotherFlag2=0;
+middl: 				for(int i=0;i<t.numInputs();i++)
+    	    		{
+    					UTXO checkUtxo = new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex);
+    	    			if(checkUtxo!=null)
+    	    			{
+    	    				if(oldUtxoToListOfTransactions.get(checkUtxo).contains(t)==true && oldUtxoToListOfTransactions.get(checkUtxo).size()<=1)
+    	    				{}
+    	    				else
+    	    				{
+    	    					anotherFlag2=1;
+    	    					break middl;
+    	    				}
+    	    			}
+    	    		}
+    				
+    				if(anotherFlag2==0)
+    				{
+    					solutionSubset.add(t);
+    					myIter.remove();
+    					for(int i=0;i<t.numInputs();i++)
+        	    		{
+        					UTXO checkUtxo = new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex);
+    						oldUtxoToListOfTransactions.remove(checkUtxo);
+        	    		}
+    					System.err.println("My trans"+t);
+    				}
     			}
+    			
     		}
-    		else if(conflictingTx.get(t).isEmpty()==false && dependencyMap.get(t)==true)
+    		firstLoop=9;
+    	}
+    	
+    	Set<UTXO> utxoKeySet = oldUtxoToListOfTransactions.keySet();
+    	
+    	for(UTXO u : utxoKeySet)
+    	{
+    		if(presentPool.contains(u))
     		{
-    			if(solutionSubset.containsAll(dependencyMapList.get(t))==true)
+    		if(oldUtxoToListOfTransactions.get(u).size()<=1)
+    			solutionSubset.addAll(oldUtxoToListOfTransactions.get(u));
+    		else
+    		{
+    			subFlag=1;
+
+				Iterator<Transaction> inIter = oldUtxoToListOfTransactions.get(u).iterator();
+    			while(inIter.hasNext())
     			{
-    				titer.remove();
+    				Transaction t = inIter.next();
+    				
+    				if(rejectionSet.contains(t))
+    				{
+    					inIter.remove();
+    					continue;
+    				}
+    				
+    				
     				UTXOPool newPresentPool;
         			newPresentPool=createCopyOfUtxoPool(presentPool);
         			HashSet<Transaction> newHPossibleTx = new HashSet<Transaction>();
     				HashSet<Transaction> newSolutionSet = new HashSet<Transaction>();
-    				newSolutionSet.addAll(solutionSubset);
+    				HashSet<Transaction> newRejectionSet = new HashSet<Transaction>();
+        			newSolutionSet.addAll(solutionSubset);
         			newHPossibleTx.addAll(hpossibleTx);
         			newSolutionSet.add(t);
-        			newHPossibleTx.removeAll(conflictingTx.get(t));
-        			newHPossibleTx.remove(t);
-        			for(int i=0;i<t.numInputs();i++)
+        			newHPossibleTx.removeAll(oldUtxoToListOfTransactions.get(u));
+        			newRejectionSet.addAll(rejectionSet);
+        			newRejectionSet.addAll(oldUtxoToListOfTransactions.get(u));
+        	    	HashMap<UTXO,HashSet<Transaction> > newUtxoToListOfTransactions = new HashMap<UTXO,HashSet<Transaction> >();
+        	    	newUtxoToListOfTransactions.putAll(oldUtxoToListOfTransactions);
+        	    	newUtxoToListOfTransactions.remove(u);
+    				for(int i=0;i<t.numInputs();i++)
     	        	{
     					newPresentPool.removeUTXO(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex));
     	        	}
@@ -265,46 +324,21 @@ public class MaxFeeTxHandler {
     	        	{
     	               	newPresentPool.addUTXO(new UTXO(t.getHash(),i),t.getOutput(i));
     	        	}
-    				subsetConstructor(newPresentPool, newSolutionSet,newHPossibleTx,hpossibleTx);
-        			
+    				
+    				subsetConstructor(newPresentPool, newSolutionSet,newHPossibleTx,newUtxoToListOfTransactions,newRejectionSet);
     			}
     		}
-    		else if(conflictingTx.get(t).isEmpty()==false && dependencyMap.get(t)==false)
-    		{
-				titer.remove();
-    			UTXOPool newPresentPool;
-    			newPresentPool=createCopyOfUtxoPool(presentPool);
-    			HashSet<Transaction> newHPossibleTx = new HashSet<Transaction>();
-				HashSet<Transaction> newSolutionSet = new HashSet<Transaction>();
-				newSolutionSet.addAll(solutionSubset);
-    			newHPossibleTx.addAll(hpossibleTx);
-    			newSolutionSet.add(t);
-    			newHPossibleTx.removeAll(conflictingTx.get(t));
-    			newHPossibleTx.remove(t);
-    			for(int i=0;i<t.numInputs();i++)
-	        	{
-					newPresentPool.removeUTXO(new UTXO(t.getInput(i).prevTxHash,t.getInput(i).outputIndex));
-	        	}
-		
-				for(int i=0;i<t.numOutputs();i++)
-	        	{
-	               	newPresentPool.addUTXO(new UTXO(t.getHash(),i),t.getOutput(i));
-	        	}
-				subsetConstructor(newPresentPool, newSolutionSet,newHPossibleTx,hpossibleTx);
-    			
     		}
-    		
-    		
     	}
     	
+    	if(subFlag==0)
+    	{
     		if(!arrayOfSubSets.contains(solutionSubset))
     		{
     			arrayOfSubSets.add(solutionSubset);
     			globalcounter++;
     		}
-    		return;
-    	
-    	
+    	}
     	
     }
     
@@ -344,18 +378,11 @@ public class MaxFeeTxHandler {
     }
     
     
-    for(Transaction g : possibleTxs)
-    {
-    	System.err.println("Dependency Graph of "+g+" is "+dependencyGraph.get(g));
-    }
     dfs();
-    for(Transaction g : possibleTxs)
-    {
-    	System.err.println("Dependency List of "+g+" is "+dependencyList.get(g));
-    }
+    
     
     HashSet<Transaction> emptySolutionSubSet = new HashSet<Transaction>();
-    HashSet<Transaction> oldemptySolutionSubSet = new HashSet<Transaction>();
+    HashSet<Transaction> emptyRejectionSubSet = new HashSet<Transaction>();
 
     
     for(Transaction t : possibleTxs)
@@ -374,66 +401,8 @@ public class MaxFeeTxHandler {
 		}
     }
     
-    
-    for(Transaction t : possibleTxs)
-    {
-
-    	Set<UTXO> utxoKeySet = utxoToListOfTransactions.keySet();
-    	
-    	for(UTXO u : utxoKeySet)
-    	{
-    		if(utxoToListOfTransactions.get(u).contains(t))
-    		{
-    			if(conflictingTx.get(t)==null)
-    				conflictingTx.put(t, new HashSet<Transaction>());
-    			conflictingTx.get(t).addAll(utxoToListOfTransactions.get(u));
-    			conflictingTx.get(t).remove(t);
-    		}
-    	}
-    	
-    	
-    }
-    
-    
-	Set<Transaction> txKeySet = conflictingTx.keySet();
-	
-	for(Transaction u : txKeySet)
-	{
-		System.err.println("Conflicts in "+u+" are "+conflictingTx.get(u));
-		
-	}   
-	
-
-    for(Transaction t : possibleTxs)
-    {
-    	int myFla=0;
-    	dependencyMapList.put(t, new HashSet<Transaction>());
-    	for(Transaction q : possibleTxs)
-    	{
-    		if(dependencyGraph.get(q).contains(t))
-    		{
-    			myFla=1;
-    			dependencyMapList.get(t).add(q);
-    		}
-    	}
-    	if(myFla==1)
-    	{
-    		dependencyMap.put(t,true);
-    	}
-    	else
-    	{
-    		dependencyMap.put(t,false);
-    		if(conflictingTx.get(t).isEmpty()==true)
-    		{
-    			possibleTxsSet.remove(t);
-    			emptySolutionSubSet.add(t);
-    		}
-    	}
-    }
-
-    System.err.println("Before Subset:"+emptySolutionSubSet);
-    
-    subsetConstructor(createCopyOfUtxoPool(publicLedger), emptySolutionSubSet,possibleTxsSet,oldemptySolutionSubSet);
+    System.err.println("Before Subset");
+    subsetConstructor(publicLedger, emptySolutionSubSet,possibleTxsSet,utxoToListOfTransactions,emptyRejectionSubSet);
     System.err.println("Subsets:"+arrayOfSubSets);
     
     int numberOfSubsets = globalcounter;
@@ -493,3 +462,4 @@ public class MaxFeeTxHandler {
     }
 
 }
+
