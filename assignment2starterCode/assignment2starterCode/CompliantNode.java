@@ -59,6 +59,8 @@ public class CompliantNode implements Node {
     	HashMap<Integer, Integer> followeeToNumberOfTx = new HashMap<Integer, Integer>();
         HashMap<Integer, HashSet<Transaction> > followeeToTxList = new HashMap<Integer, HashSet<Transaction> >();
         	
+    	System.err.println("Malicious List"+maliciousOrNot);
+
     	for(Candidate c : candidates)
     	{
 			receivedTransactions.add(c.tx);
@@ -84,6 +86,7 @@ public class CompliantNode implements Node {
     			{
     				if(followeeToNumberOfTx.get(i)==null || followeeToTxList.get(i)==null)
     				{
+    					System.err.println("Because of null");
     					maliciousOrNot.put(i, true);
     				}
     				else
